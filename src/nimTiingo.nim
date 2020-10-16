@@ -74,9 +74,3 @@ proc requestFXData*(client: TiingoClient, startDate: DateTime, symbol: string): 
         tstamp = parse(bar["date"].getStr, "yyyy-MM-dd'T'hh:mm:ss'.'fff'Z'").toTime
         result.add((tstamp: tstamp, barOpen: bar["open"].getFloat, barHigh: bar["high"].getFloat, barLow: bar["low"].getFloat,
         barClose: bar["close"].getFloat))
-
-if isMainModule:
-    let startDate = initDateTime(1, mJul, 2019, 0,0,0)
-    let endDate = initDateTime(31, mJul, 2019, 0,0,0)
-    var client = newTiingoClient("8e6934b3aac8d59a5eb749708d41b1563061aa24")
-    echo client.requestIEXTopOfBookMulti(["AAPL","MSFT"])
