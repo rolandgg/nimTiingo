@@ -2,24 +2,31 @@ import httpclient
 import times, strformat, json, algorithm, strutils
 import nimTiingo/bartypes
 import tables
+import asyncdispatch
 
 export
   bartypes
 
 type
   TiingoClient = ref object
-    http: HttpClient
+    http: AsyncHttpClient
     apiKey: string
+
+proc parseRealTimeTS(tstamp: string): Time =
+  try:
+    result = parse(tstamp, "yyyy-MM-dd'T'hh:mm:ss'.'fffffffffzzz").toTime
+  except TimeParseError:
+    result = parse(tstamp, "yyyy-MM-dd'T'hh:mm:sszzz").toTime
 
 proc parseTopofBook(data: JsonNode): TopOfBook {.inline.}=
   result.prevClose = data["prevClose"].getFloat
   result.mid = data["mid"].getFloat
-  result.lastSaleTime = parse(data["lastSaleTimestamp"].getStr, "yyyy-MM-dd'T'hh:mm:sszzz").toTime
+  result.lastSaleTime = parseRealTimeTS(data["lastSaleTimestamp"].getStr)
   result.open = data["open"].getFloat
   result.askPrice = data["askPrice"].getFloat
   result.low = data["low"].getFloat
-  result.tstamp = parse(data["timestamp"].getStr, "yyyy-MM-dd'T'hh:mm:sszzz").toTime
-  result.quoteTstamp = parse(data["quoteTimestamp"].getStr, "yyyy-MM-dd'T'hh:mm:sszzz").toTime
+  result.tstamp = parseRealTimeTS(data["timestamp"].getStr)
+  result.quoteTstamp = parseRealTimeTS(data["quoteTimestamp"].getStr)
   result.bidPrice = data["bidPrice"].getFloat
   result.bidSize = data["bidSize"].getInt
   result.askSize = data["askSize"].getInt
@@ -27,14 +34,14 @@ proc parseTopofBook(data: JsonNode): TopOfBook {.inline.}=
 
 proc newTiingoClient*(key: string): TiingoClient =
   new(result)
-  result.http = newHttpClient()
+  result.http = newAsyncHttpClient()
   result.apiKey = key
 
 
-proc requestStockData*(client: TiingoClient, startDate: DateTime, endDate: DateTime, symbol: string): tuple[data: seq[EqBar], adj: seq[AdBar]] =
+proc requestStockData*(client: TiingoClient, startDate: DateTime, endDate: DateTime, symbol: string): Future[tuple[data: seq[EqBar], adj: seq[AdBar]]] {.async.} =
   let startstr = startDate.format("yyyy-M-d")
   let endstr = endDate.format("yyyy-M-d")
-  let raw = client.http.getContent(fmt"https://api.tiingo.com/tiingo/daily/{symbol}/prices?token={client.apiKey}&startDate={startstr}&endDate={endstr}&format=json&resampleFreq=daily")
+  let raw = await client.http.getContent(fmt"https://api.tiingo.com/tiingo/daily/{symbol}/prices?token={client.apiKey}&startDate={startstr}&endDate={endstr}&format=json&resampleFreq=daily")
   let data = parseJson(raw)
   var eqbars: seq[EqBar] = @[]
   var adbars: seq[AdBar] = @[]
@@ -50,23 +57,23 @@ proc requestStockData*(client: TiingoClient, startDate: DateTime, endDate: DateT
     result = cmp(y.tstamp, x.tstamp)
   return (data: eqbars, adj: adbars)
 
-proc requestIEXTopOfBook*(client: TiingoClient, symbol: string): TopOfBook =
-  let raw = client.http.getContent(fmt"https://api.tiingo.com/iex/?tickers={symbol}&token={client.apiKey}")
+proc requestIEXTopOfBook*(client: TiingoClient, symbol: string): Future[TopOfBook] {.async.} =
+  let raw = await client.http.getContent(fmt"https://api.tiingo.com/iex/?tickers={symbol}&token={client.apiKey}")
   let data = parseJson(raw)[0]
-  parseTopofBook(data)
+  return parseTopofBook(data)
   
 
-proc requestIEXTopOfBookMulti*(client: TiingoClient, symbols: openArray[string]): Table[string,TopOfBook] =
+proc requestIEXTopOfBookMulti*(client: TiingoClient, symbols: openArray[string]): Future[Table[string,TopOfBook]] {.async.} =
   var serial = join(symbols, ",")
-  let raw = client.http.getContent(fmt"https://api.tiingo.com/iex/?tickers={serial}&token={client.apiKey}")
+  let raw = await client.http.getContent(fmt"https://api.tiingo.com/iex/?tickers={serial}&token={client.apiKey}")
   let data = parseJson(raw)
   result = initTable[string,TopOfBook]()
   for ticker in data:
     result[ticker["ticker"].getStr] = parseTopofBook(ticker)
 
-proc requestFXData*(client: TiingoClient, startDate: DateTime, symbol: string): seq[FxBar] =
+proc requestFXData*(client: TiingoClient, startDate: DateTime, symbol: string): Future[seq[FxBar]] {.async.} =
     let startstr = startDate.format("yyyy-M-d")
-    let raw = client.http.getContent(fmt"https://api.tiingo.com/tiingo/fx/{symbol}/prices?startDate={startstr}&resampleFreq=1Day&token={client.apiKey}")
+    let raw = await client.http.getContent(fmt"https://api.tiingo.com/tiingo/fx/{symbol}/prices?startDate={startstr}&resampleFreq=1Day&token={client.apiKey}")
     let data = parseJson(raw)
     var tstamp: Time
     result = @[]
